@@ -1,4 +1,4 @@
-name: Build Fritzing App and Upload Artifacts
+name: Build Fritzing
 
 on:
   push:
@@ -7,112 +7,326 @@ on:
     branches: [ main, develop ]
   workflow_dispatch:
 
+env:
+  QT_VERSION: "6.5.3"
+  BOOST_VERSION: "1.82.0"
+  LIBGIT2_VERSION: "1.7.1"
+  NGSPICE_VERSION: "42"
+  QUAZIP_VERSION: "1.4"
+  OPENSSL_VERSION: "3.0.12"
+  CLIPPER_VERSION: "6.4.2"
+
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-2022
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
-
+        arch: [x64]
+        config: [Release]
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout fritzing-app
+      uses: actions/checkout@v4
+      with:
+        path: fritzing-app
+        fetch-depth: 0
 
-      - name: Set up Qt (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.5.3'
-          host: 'windows'
-          arch: 'win64_msvc2019_64'
+    - name: Checkout fritzing-parts
+      uses: actions/checkout@v4
+      with:
+        repository: fritzing/fritzing-parts
+        path: fritzing-parts
+        ref: main
 
-      - name: Set up Qt (macOS)
-        if: matrix.os == 'macos-latest'
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.5.3'
-          host: 'mac'
-          arch: 'clang_64'
+    - name: Setup MSVC
+      uses: microsoft/setup-msbuild@v2
 
-      - name: Install dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          choco install -y git cmake
+    - name: Setup Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: ${{ env.QT_VERSION }}
+        host: windows
+        target: desktop
+        arch: win64_msvc2019_64
+        modules: 'qtserialport qtsvg'
+        cache: true
 
-      - name: Install dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew update
-          brew install cmake
+    - name: Install dependencies with vcpkg
+      run: |
+        vcpkg install boost-system:x64-windows boost-filesystem:x64-windows boost-thread:x64-windows
+        vcpkg install openssl:x64-windows
+        vcpkg install zlib:x64-windows
 
-      - name: Build libgit2 (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          git clone --branch v1.7.1 --depth 1 https://github.com/libgit2/libgit2.git libgit2-1.7.1
-          cd libgit2-1.7.1
-          mkdir build64
-          cd build64
-          cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_CLAR=OFF
-          cmake --build . --config Release
-          cd ..
-          mkdir Release
-          copy build64\Release\git2.lib Release\
-          copy include\git2.h include\git2_global.h ..\include\
-        shell: cmd
+    - name: Cache Boost
+      id: cache-boost
+      uses: actions/cache@v4
+      with:
+        path: boost_${{ env.BOOST_VERSION }}_0
+        key: boost-${{ env.BOOST_VERSION }}-windows-${{ matrix.arch }}
 
-      - name: Build libgit2 (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          git clone --branch v1.7.1 --depth 1 https://github.com/libgit2/libgit2.git libgit2-1.7.1
-          cd libgit2-1.7.1
-          mkdir build
-          cd build
-          cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_CLAR=OFF
-          cmake --build . --config Release
-          cd ..
-          mkdir -p lib
-          cp build/libgit2.a lib/
-          cp -r include ../include
-        shell: bash
+    - name: Download and build Boost
+      if: steps.cache-boost.outputs.cache-hit != 'true'
+      run: |
+        $url = "https://boostorg.jfrog.io/artifactory/main/release/${{ env.BOOST_VERSION }}/source/boost_$($env:BOOST_VERSION.Replace('.', '_'))_0.zip"
+        Invoke-WebRequest -Uri $url -OutFile "boost.zip"
+        Expand-Archive -Path "boost.zip" -DestinationPath "."
+        cd "boost_$($env:BOOST_VERSION.Replace('.', '_'))_0"
+        .\bootstrap.bat
+        .\b2 --with-system --with-filesystem --with-thread variant=release link=static threading=multi runtime-link=shared
 
-      - name: Build Fritzing (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          qmake
-          cmake --build . --config Release
-        shell: cmd
+    - name: Cache libgit2
+      id: cache-libgit2
+      uses: actions/cache@v4
+      with:
+        path: libgit2-${{ env.LIBGIT2_VERSION }}
+        key: libgit2-${{ env.LIBGIT2_VERSION }}-windows-${{ matrix.arch }}
 
-      - name: Build Fritzing (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          qmake
-          cmake --build . --config Release
-        shell: bash
+    - name: Download and build libgit2
+      if: steps.cache-libgit2.outputs.cache-hit != 'true'
+      run: |
+        git clone --branch v${{ env.LIBGIT2_VERSION }} --depth 1 https://github.com/libgit2/libgit2.git libgit2-${{ env.LIBGIT2_VERSION }}
+        cd libgit2-${{ env.LIBGIT2_VERSION }}
+        mkdir build64
+        cd build64
+        cmake -G "Visual Studio 17 2022" -A x64 -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release ..
+        cmake --build . --config Release
 
-      - name: Find build artifact (Windows)
-        if: matrix.os == 'windows-latest'
-        id: artifact-win
-        run: |
-          echo "artifact_path=$(Get-ChildItem -Path . -Filter fritzing.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName)" >> $env:GITHUB_ENV
-        shell: powershell
+    - name: Cache ngspice
+      id: cache-ngspice
+      uses: actions/cache@v4
+      with:
+        path: ngspice-${{ env.NGSPICE_VERSION }}
+        key: ngspice-${{ env.NGSPICE_VERSION }}-windows
 
-      - name: Find build artifact (macOS)
-        if: matrix.os == 'macos-latest'
-        id: artifact-mac
-        run: |
-          echo "artifact_path=$(find . -type d -name 'Fritzing.app' | head -n 1)" >> $GITHUB_ENV
-        shell: bash
+    - name: Download ngspice
+      if: steps.cache-ngspice.outputs.cache-hit != 'true'
+      run: |
+        $url = "https://sourceforge.net/projects/ngspice/files/ng-spice-rework/${{ env.NGSPICE_VERSION }}/ngspice-${{ env.NGSPICE_VERSION }}.tar.gz"
+        Invoke-WebRequest -Uri $url -OutFile "ngspice.tar.gz"
+        tar -xzf ngspice.tar.gz
 
-      - name: Upload artifact (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: fritzing-windows
-          path: ${{ env.artifact_path }}
+    - name: Cache QuaZip
+      id: cache-quazip
+      uses: actions/cache@v4
+      with:
+        path: quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}
+        key: quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}-windows-${{ matrix.arch }}
 
-      - name: Upload artifact (macOS)
-        if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: fritzing-macos
-          path: ${{ env.artifact_path }}
+    - name: Download and build QuaZip
+      if: steps.cache-quazip.outputs.cache-hit != 'true'
+      run: |
+        git clone --branch v${{ env.QUAZIP_VERSION }} --depth 1 https://github.com/stachenov/quazip.git quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}
+        cd quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}
+        mkdir build
+        cd build
+        cmake -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DQUAZIP_QT_MAJOR_VERSION=6 ..
+        cmake --build . --config Release
+
+    - name: Cache Clipper
+      id: cache-clipper
+      uses: actions/cache@v4
+      with:
+        path: Clipper1-${{ env.CLIPPER_VERSION }}
+        key: clipper-${{ env.CLIPPER_VERSION }}-windows-${{ matrix.arch }}
+
+    - name: Download Clipper
+      if: steps.cache-clipper.outputs.cache-hit != 'true'
+      run: |
+        $url = "https://sourceforge.net/projects/polyclipping/files/clipper_ver${{ env.CLIPPER_VERSION }}.zip"
+        Invoke-WebRequest -Uri $url -OutFile "clipper.zip"
+        Expand-Archive -Path "clipper.zip" -DestinationPath "Clipper1-${{ env.CLIPPER_VERSION }}"
+
+    - name: Build Fritzing
+      run: |
+        cd fritzing-app
+        $env:boost_root = "$env:GITHUB_WORKSPACE\boost_$($env:BOOST_VERSION.Replace('.', '_'))_0"
+        qmake phoenix.pro "QMAKE_TARGET.arch=x86_64"
+        nmake release
+      shell: cmd
+
+    - name: Create parts database
+      run: |
+        cd fritzing-app
+        $releasePath = Get-ChildItem -Path ".." -Directory -Name "*release*" | Select-Object -First 1
+        & "..\$releasePath\Fritzing.exe" -db "..\fritzing-parts\parts.db" -pp "..\fritzing-parts"
+
+    - name: Package Windows build
+      run: |
+        mkdir fritzing-windows-${{ matrix.arch }}
+        $releasePath = Get-ChildItem -Path "." -Directory -Name "*release*" | Select-Object -First 1
+        Copy-Item -Path "$releasePath\Fritzing.exe" -Destination "fritzing-windows-${{ matrix.arch }}\"
+        Copy-Item -Path "fritzing-app\translations" -Destination "fritzing-windows-${{ matrix.arch }}\" -Recurse
+        Copy-Item -Path "fritzing-app\sketches" -Destination "fritzing-windows-${{ matrix.arch }}\" -Recurse
+        Copy-Item -Path "fritzing-app\help" -Destination "fritzing-windows-${{ matrix.arch }}\" -Recurse
+        Copy-Item -Path "fritzing-parts" -Destination "fritzing-windows-${{ matrix.arch }}\" -Recurse
+        Copy-Item -Path "fritzing-app\README.md" -Destination "fritzing-windows-${{ matrix.arch }}\"
+        Copy-Item -Path "fritzing-app\LICENSE.*" -Destination "fritzing-windows-${{ matrix.arch }}\"
+
+    - name: Deploy Qt dependencies
+      run: |
+        windeployqt.exe fritzing-windows-${{ matrix.arch }}\Fritzing.exe
+
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fritzing-windows-${{ matrix.arch }}
+        path: fritzing-windows-${{ matrix.arch }}
+
+  build-macos:
+    runs-on: macos-12
+    strategy:
+      matrix:
+        arch: [arm64, x86_64]
+        config: [Release]
+    
+    steps:
+    - name: Checkout fritzing-app
+      uses: actions/checkout@v4
+      with:
+        path: fritzing-app
+        fetch-depth: 0
+
+    - name: Checkout fritzing-parts
+      uses: actions/checkout@v4
+      with:
+        repository: fritzing/fritzing-parts
+        path: fritzing-parts
+        ref: main
+
+    - name: Setup Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: ${{ env.QT_VERSION }}
+        host: mac
+        target: desktop
+        modules: 'qtserialport qtsvg'
+        cache: true
+
+    - name: Install dependencies with Homebrew
+      run: |
+        brew install cmake openssl zlib pkg-config
+
+    - name: Cache Boost
+      id: cache-boost-mac
+      uses: actions/cache@v4
+      with:
+        path: boost_${{ env.BOOST_VERSION }}_0
+        key: boost-${{ env.BOOST_VERSION }}-macos-${{ matrix.arch }}
+
+    - name: Download and build Boost
+      if: steps.cache-boost-mac.outputs.cache-hit != 'true'
+      run: |
+        wget "https://boostorg.jfrog.io/artifactory/main/release/${{ env.BOOST_VERSION }}/source/boost_$(echo ${{ env.BOOST_VERSION }} | tr . _)_0.tar.bz2"
+        tar -xjf "boost_$(echo ${{ env.BOOST_VERSION }} | tr . _)_0.tar.bz2"
+        cd "boost_$(echo ${{ env.BOOST_VERSION }} | tr . _)_0"
+        ./bootstrap.sh
+        ./b2 --with-system --with-filesystem --with-thread variant=release link=static threading=multi
+
+    - name: Cache libgit2
+      id: cache-libgit2-mac
+      uses: actions/cache@v4
+      with:
+        path: libgit2-${{ env.LIBGIT2_VERSION }}
+        key: libgit2-${{ env.LIBGIT2_VERSION }}-macos-${{ matrix.arch }}
+
+    - name: Download and build libgit2
+      if: steps.cache-libgit2-mac.outputs.cache-hit != 'true'
+      run: |
+        git clone --branch v${{ env.LIBGIT2_VERSION }} --depth 1 https://github.com/libgit2/libgit2.git libgit2-${{ env.LIBGIT2_VERSION }}
+        cd libgit2-${{ env.LIBGIT2_VERSION }}
+        mkdir build
+        cd build
+        cmake -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release ..
+        make -j$(sysctl -n hw.ncpu)
+
+    - name: Cache ngspice
+      id: cache-ngspice-mac
+      uses: actions/cache@v4
+      with:
+        path: ngspice-${{ env.NGSPICE_VERSION }}
+        key: ngspice-${{ env.NGSPICE_VERSION }}-macos
+
+    - name: Download ngspice
+      if: steps.cache-ngspice-mac.outputs.cache-hit != 'true'
+      run: |
+        wget "https://sourceforge.net/projects/ngspice/files/ng-spice-rework/${{ env.NGSPICE_VERSION }}/ngspice-${{ env.NGSPICE_VERSION }}.tar.gz"
+        tar -xzf ngspice-${{ env.NGSPICE_VERSION }}.tar.gz
+
+    - name: Cache QuaZip
+      id: cache-quazip-mac
+      uses: actions/cache@v4
+      with:
+        path: quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}
+        key: quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}-macos-${{ matrix.arch }}
+
+    - name: Download and build QuaZip
+      if: steps.cache-quazip-mac.outputs.cache-hit != 'true'
+      run: |
+        git clone --branch v${{ env.QUAZIP_VERSION }} --depth 1 https://github.com/stachenov/quazip.git quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}
+        cd quazip-${{ env.QT_VERSION }}-${{ env.QUAZIP_VERSION }}
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Release -DQUAZIP_QT_MAJOR_VERSION=6 ..
+        make -j$(sysctl -n hw.ncpu)
+
+    - name: Cache Clipper
+      id: cache-clipper-mac
+      uses: actions/cache@v4
+      with:
+        path: Clipper1
+        key: clipper-${{ env.CLIPPER_VERSION }}-macos
+
+    - name: Download Clipper
+      if: steps.cache-clipper-mac.outputs.cache-hit != 'true'
+      run: |
+        wget "https://sourceforge.net/projects/polyclipping/files/clipper_ver${{ env.CLIPPER_VERSION }}.zip"
+        unzip clipper_ver${{ env.CLIPPER_VERSION }}.zip -d Clipper1
+
+    - name: Build Fritzing
+      run: |
+        cd fritzing-app
+        export boost_root="$GITHUB_WORKSPACE/boost_$(echo ${{ env.BOOST_VERSION }} | tr . _)_0"
+        qmake phoenix.pro
+        make -j$(sysctl -n hw.ncpu) release
+
+    - name: Create parts database
+      run: |
+        cd fritzing-app
+        RELEASE_PATH=$(find .. -name "*release*" -type d | head -1)
+        "$RELEASE_PATH/Fritzing.app/Contents/MacOS/Fritzing" -db "../fritzing-parts/parts.db" -pp "../fritzing-parts"
+
+    - name: Create DMG
+      run: |
+        cd fritzing-app
+        RELEASE_PATH=$(find .. -name "*release*" -type d | head -1)
+        cp -rf sketches help translations README.md LICENSE.* "$RELEASE_PATH/Fritzing.app/Contents/MacOS/"
+        cp -rf ../fritzing-parts "$RELEASE_PATH/Fritzing.app/Contents/MacOS/"
+        macdeployqt "$RELEASE_PATH/Fritzing.app" -dmg
+
+    - name: Upload macOS artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fritzing-macos-${{ matrix.arch }}
+        path: |
+          **/Fritzing.dmg
+
+  create-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Create Release
+      if: github.ref == 'refs/heads/main'
+      uses: ncipollo/release-action@v1
+      with:
+        tag: "nightly-${{ github.run_number }}"
+        name: "Nightly Build ${{ github.run_number }}"
+        artifacts: "fritzing-*/**/*"
+        draft: false
+        prerelease: true
+        generateReleaseNotes: true
+        token: ${{ secrets.GITHUB_TOKEN }}
