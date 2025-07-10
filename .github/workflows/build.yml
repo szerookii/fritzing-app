@@ -48,7 +48,7 @@ jobs:
         host: windows
         target: desktop
         arch: win64_msvc2019_64
-        modules: 'qtserialport qtsvg'
+        # Suppression des modules - Qt6 inclut SVG par défaut, SerialPort aussi
         cache: true
 
     - name: Install dependencies with vcpkg
@@ -67,10 +67,11 @@ jobs:
     - name: Download and build Boost
       if: steps.cache-boost.outputs.cache-hit != 'true'
       run: |
-        $url = "https://boostorg.jfrog.io/artifactory/main/release/${{ env.BOOST_VERSION }}/source/boost_$($env:BOOST_VERSION.Replace('.', '_'))_0.zip"
+        $boostVersion = "${{ env.BOOST_VERSION }}".Replace('.', '_')
+        $url = "https://boostorg.jfrog.io/artifactory/main/release/${{ env.BOOST_VERSION }}/source/boost_${boostVersion}_0.zip"
         Invoke-WebRequest -Uri $url -OutFile "boost.zip"
         Expand-Archive -Path "boost.zip" -DestinationPath "."
-        cd "boost_$($env:BOOST_VERSION.Replace('.', '_'))_0"
+        cd "boost_${boostVersion}_0"
         .\bootstrap.bat
         .\b2 --with-system --with-filesystem --with-thread variant=release link=static threading=multi runtime-link=shared
 
@@ -139,10 +140,10 @@ jobs:
     - name: Build Fritzing
       run: |
         cd fritzing-app
-        $env:boost_root = "$env:GITHUB_WORKSPACE\boost_$($env:BOOST_VERSION.Replace('.', '_'))_0"
+        $boostVersion = "${{ env.BOOST_VERSION }}".Replace('.', '_')
+        $env:boost_root = "$env:GITHUB_WORKSPACE\boost_${boostVersion}_0"
         qmake phoenix.pro "QMAKE_TARGET.arch=x86_64"
         nmake release
-      shell: cmd
 
     - name: Create parts database
       run: |
@@ -199,7 +200,7 @@ jobs:
         version: ${{ env.QT_VERSION }}
         host: mac
         target: desktop
-        modules: 'qtserialport qtsvg'
+        # Suppression des modules pour macOS aussi
         cache: true
 
     - name: Install dependencies with Homebrew
@@ -216,9 +217,10 @@ jobs:
     - name: Download and build Boost
       if: steps.cache-boost-mac.outputs.cache-hit != 'true'
       run: |
-        wget "https://boostorg.jfrog.io/artifactory/main/release/${{ env.BOOST_VERSION }}/source/boost_$(echo ${{ env.BOOST_VERSION }} | tr . _)_0.tar.bz2"
-        tar -xjf "boost_$(echo ${{ env.BOOST_VERSION }} | tr . _)_0.tar.bz2"
-        cd "boost_$(echo ${{ env.BOOST_VERSION }} | tr . _)_0"
+        BOOST_VERSION_UNDERSCORE=$(echo ${{ env.BOOST_VERSION }} | tr . _)
+        wget "https://boostorg.jfrog.io/artifactory/main/release/${{ env.BOOST_VERSION }}/source/boost_${BOOST_VERSION_UNDERSCORE}_0.tar.bz2"
+        tar -xjf "boost_${BOOST_VERSION_UNDERSCORE}_0.tar.bz2"
+        cd "boost_${BOOST_VERSION_UNDERSCORE}_0"
         ./bootstrap.sh
         ./b2 --with-system --with-filesystem --with-thread variant=release link=static threading=multi
 
@@ -285,7 +287,8 @@ jobs:
     - name: Build Fritzing
       run: |
         cd fritzing-app
-        export boost_root="$GITHUB_WORKSPACE/boost_$(echo ${{ env.BOOST_VERSION }} | tr . _)_0"
+        BOOST_VERSION_UNDERSCORE=$(echo ${{ env.BOOST_VERSION }} | tr . _)
+        export boost_root="$GITHUB_WORKSPACE/boost_${BOOST_VERSION_UNDERSCORE}_0"
         qmake phoenix.pro
         make -j$(sysctl -n hw.ncpu) release
 
