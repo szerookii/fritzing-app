@@ -48,48 +48,60 @@ jobs:
       - name: Build libgit2 (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          git clone --branch v1.7.1 --depth 1 https://github.com/libgit2/libgit2.git
-          cd libgit2
-          mkdir build
-          cd build
-          cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_CLAR=OFF -DCMAKE_INSTALL_PREFIX=../../libgit2-1.7.1
-          cmake --build . --config Release --target install
+          git clone --branch v1.7.1 --depth 1 https://github.com/libgit2/libgit2.git libgit2-1.7.1
+          cd libgit2-1.7.1
+          mkdir build64
+          cd build64
+          cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_CLAR=OFF
+          cmake --build . --config Release
+          cd ..
+          mkdir Release
+          copy build64\Release\git2.lib Release\
+          copy include\git2.h include\git2_global.h ..\include\
         shell: cmd
 
       - name: Build libgit2 (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          git clone --branch v1.7.1 --depth 1 https://github.com/libgit2/libgit2.git
-          cd libgit2
+          git clone --branch v1.7.1 --depth 1 https://github.com/libgit2/libgit2.git libgit2-1.7.1
+          cd libgit2-1.7.1
           mkdir build
           cd build
-          cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_CLAR=OFF -DCMAKE_INSTALL_PREFIX=../../libgit2-1.7.1
-          cmake --build . --config Release --target install
+          cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_CLAR=OFF
+          cmake --build . --config Release
+          cd ..
+          mkdir -p lib
+          cp build/libgit2.a lib/
+          cp -r include ../include
+        shell: bash
 
-      # Compile Fritzing
-      - name: Build (Windows)
+      - name: Build Fritzing (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           qmake
           cmake --build . --config Release
+        shell: cmd
 
-      - name: Build (macOS)
+      - name: Build Fritzing (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           qmake
           cmake --build . --config Release
+        shell: bash
 
       - name: Find build artifact (Windows)
         if: matrix.os == 'windows-latest'
         id: artifact-win
         run: |
           echo "artifact_path=$(Get-ChildItem -Path . -Filter fritzing.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName)" >> $env:GITHUB_ENV
+        shell: powershell
 
       - name: Find build artifact (macOS)
         if: matrix.os == 'macos-latest'
         id: artifact-mac
         run: |
           echo "artifact_path=$(find . -type d -name 'Fritzing.app' | head -n 1)" >> $GITHUB_ENV
+        shell: bash
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
