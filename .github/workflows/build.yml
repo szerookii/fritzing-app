@@ -45,6 +45,28 @@ jobs:
           brew update
           brew install cmake
 
+      - name: Build libgit2 (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          git clone --branch v1.7.1 --depth 1 https://github.com/libgit2/libgit2.git
+          cd libgit2
+          mkdir build
+          cd build
+          cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_CLAR=OFF -DCMAKE_INSTALL_PREFIX=../../libgit2-1.7.1
+          cmake --build . --config Release --target install
+        shell: cmd
+
+      - name: Build libgit2 (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          git clone --branch v1.7.1 --depth 1 https://github.com/libgit2/libgit2.git
+          cd libgit2
+          mkdir build
+          cd build
+          cmake .. -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_CLAR=OFF -DCMAKE_INSTALL_PREFIX=../../libgit2-1.7.1
+          cmake --build . --config Release --target install
+
+      # Compile Fritzing
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
         run: |
