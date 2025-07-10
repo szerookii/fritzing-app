@@ -18,20 +18,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Qt (windows)
+      - name: Set up Qt (Windows)
         if: matrix.os == 'windows-latest'
         uses: jurplel/install-qt-action@v4
         with:
-          version: '5.15.2'
+          version: '6.5.3'
           host: 'windows'
           arch: 'win64_msvc2019_64'
-          tools: 'tools_mingw,qt.tools.qtcreator'
 
       - name: Set up Qt (macOS)
         if: matrix.os == 'macos-latest'
         uses: jurplel/install-qt-action@v4
         with:
-          version: '5.15.2'
+          version: '6.5.3'
           host: 'mac'
           arch: 'clang_64'
 
@@ -68,7 +67,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         id: artifact-mac
         run: |
-          echo "artifact_path=$(find . -type f -name 'Fritzing.app' | head -n 1)" >> $GITHUB_ENV
+          echo "artifact_path=$(find . -type d -name 'Fritzing.app' | head -n 1)" >> $GITHUB_ENV
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
