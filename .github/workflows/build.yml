@@ -1,0 +1,86 @@
+name: Build Fritzing App and Upload Artifacts
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Qt (windows)
+        if: matrix.os == 'windows-latest'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: 'windows'
+          arch: 'win64_msvc2019_64'
+          tools: 'tools_mingw,qt.tools.qtcreator'
+
+      - name: Set up Qt (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: 'mac'
+          arch: 'clang_64'
+          tools: 'qt.tools.qtcreator'
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install -y git cmake
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install cmake
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          qmake
+          cmake --build . --config Release
+
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          qmake
+          cmake --build . --config Release
+
+      - name: Find build artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        id: artifact-win
+        run: |
+          echo "artifact_path=$(Get-ChildItem -Path . -Filter fritzing.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName)" >> $env:GITHUB_ENV
+
+      - name: Find build artifact (macOS)
+        if: matrix.os == 'macos-latest'
+        id: artifact-mac
+        run: |
+          echo "artifact_path=$(find . -type f -name 'Fritzing.app' | head -n 1)" >> $GITHUB_ENV
+
+      - name: Upload artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fritzing-windows
+          path: ${{ env.artifact_path }}
+
+      - name: Upload artifact (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fritzing-macos
+          path: ${{ env.artifact_path }}
